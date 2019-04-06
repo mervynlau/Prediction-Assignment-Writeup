@@ -1,0 +1,106 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Mervyn Lau"
+date: "2/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r message=FALSE}
+rm(list = ls())
+library(tidyverse)
+library(caret)
+```
+
+The goal of your project is to predict the "classe" variable in the pml_testing dataset. 
+We first import both the training and testing datasets.  We also clean the training set by removing the unnecessary columns.  
+
+```{r import data, echo=TRUE, message=FALSE, warning=FALSE}
+pml_training <-
+  read_csv(
+  "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+  na = c("", "NA", "#DIV/0!"),
+  col_types = cols(
+  cvtd_timestamp = col_datetime(format = "%m/%d/%Y %H:%M"),
+  classe = col_factor(levels = c("A", "B", "C", "D", "E"))
+  )
+  )
+  
+pml_testing <-
+  read_csv(
+  "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+  na = c("", "NA", "#DIV/0!"),
+  col_types = cols(cvtd_timestamp = col_datetime(format = "%m/%d/%Y %H:%M"))
+  ) %>% select_if(function(x) {
+  !all(is.na(x))
+  }) %>%
+  mutate(new_window = as.factor(new_window))
+  
+pml_training <-
+  select(pml_training, names(pml_testing %>% select(-problem_id)), classe, -c(X1:cvtd_timestamp)) %>%
+  mutate(new_window = as.factor(new_window))
+names(pml_training)
+```
+
+We further split the training dataset into the training subset and the testing subset for the cross validation purpose.  
+
+We have sampled 75% from the data from the training dataset to form the training subset and leave the remaining 25% of the data as the testing subset for cross validation of the models.  
+
+```{r training data splitting}
+set.seed(12345)
+inTrain <-
+  createDataPartition(y = pml_training$classe, p = .75, list = FALSE)
+sub_training <- pml_training[inTrain,]
+sub_testing <- pml_training[-inTrain,]
+```
+
+Two models are trained with the training data subset.  The first model is the decision tree model and the second model is the Random Forest model.  We then compare the fitting and prediction results from these two models by their confusion matrix.  
+
+```{r decision tree model}
+library(rpart); library(rattle)
+modFitDT <- rpart(classe ~ ., data = sub_training, method="class", control = rpart.control(method = "cv", number = 10))
+```
+
+```{r dt confusion matrix of the training subset}
+predDT_train <- predict(modFitDT, sub_training, type = "class")
+confusionMatrix(sub_training$classe, predDT_train)
+```
+
+```{r dt confusion matrix of the testing subset}
+predDT_test <- predict(modFitDT, sub_testing, type = "class")
+confusionMatrix(sub_testing$classe, predDT_test)
+```
+
+```{r random forest model}
+library(randomForest)
+modFitRF <- randomForest(classe ~ ., data = sub_training, importance=TRUE)
+```
+
+```{r rf confusion matrix of the training subset}
+predRF_train <- predict(modFitRF, sub_training)
+confusionMatrix(sub_training$classe, predRF_train)
+```
+
+
+
+```{r rf confusion matrix of the testing subset}
+predRF <- predict(modFitRF, sub_testing)
+confusionMatrix(sub_testing$classe, predRF)
+```
+
+Based on the result above confusion matrix results, the Random Forest model is a more superior model than the decision tree model.  The Random Forest model have a higher accuracy than the decision tree model in both the prediction of the training and testing subsets.  The prediction of the training data subset yields 100% accuracy without error.  The prediction of the testing data subset yields 99.63% accuracy with a slightly higher sample error of 0.37%.  
+
+We then use the Random Forest model for the final prediction of the 20 observations in the testing dataset.  
+
+```{r prediction of the testing dataset with rf model}
+dataPred <- rbind(select(pml_training, -classe), pml_testing %>% select(new_window:magnet_forearm_z)) %>% tail(20)
+predRF_testing <- predict(modFitRF, newdata = dataPred)
+predRF_testing
+```
+
